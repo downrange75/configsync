@@ -1,0 +1,208 @@
+#!/usr/bin/perl
+##################################################################################
+# Copyright (C) 2010  Chris Rutledge <rutledge.chris@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+##################################################################################
+use strict;
+use Getopt::Long;
+
+######################
+# Global Variables
+######################
+my $CACHE_DIR   = "/etc/configsync/.cache";
+my $UDCFG_FILE  = "$CACHE_DIR/configsync.cfg";
+my @UDCFG       = ();
+my $USAGE       = undef;
+my $SKIP_DL     = undef;
+my $REMOTE_HOST = undef;
+my $REMOTE_USER = "root";
+my $REMOTE_DIR  = "/etc/configsync/updates";
+
+######################
+# Read commandline options
+######################
+GetOptions('usage|help'    => \$USAGE,
+           's|skipdl'      => \$SKIP_DL,
+           'h|host=s'      => \$REMOTE_HOST,
+           'u|user=s'      => \$REMOTE_USER,
+           'd|remotedir=s' => \$REMOTE_DIR);
+
+if ($USAGE){
+   printUsage();
+   exit 1;
+}
+
+if ((! $SKIP_DL) && (! $REMOTE_HOST)){
+   print "ERROR: No Remote Host Defined!\n";
+   printUsage();
+   exit 2;
+}
+
+######################
+# Create the tmp dir
+# if it doesn't exist
+######################
+if (! -d $CACHE_DIR){
+   `mkdir -p $CACHE_DIR`;
+}else{
+   if (! $SKIP_DL){
+      `rm -rf $CACHE_DIR/*`;
+   }
+}
+
+if (! $SKIP_DL){
+   retrieveLatestConfigs();
+}
+
+loadCFGFile();
+
+######################
+# Start looping on the
+# config array and process
+# the config files for changes
+######################
+foreach my $i (0 .. $#UDCFG){
+   if (! $UDCFG[$i]{'NAME'}){next;}
+
+   print "################################\n";
+
+   my $NAME        = $UDCFG[$i]{'NAME'};
+   my $FILE        = $UDCFG[$i]{'FILE'};
+   my $DIR         = $UDCFG[$i]{'DIR'};
+   my $RESTART_CMD = $UDCFG[$i]{'RESTART_CMD'};
+   my $PERMS       = $UDCFG[$i]{'PERMS'};
+   my $OWNER       = $UDCFG[$i]{'OWNER'};
+
+   print "Config: $NAME\n";
+   print "File: $FILE\n";
+
+   if (! -f "$CACHE_DIR/$FILE"){
+      print "Could not find file: $CACHE_DIR/$FILE\n";
+   }
+
+   if (diffFile("$FILE", "$DIR")){
+      print "...found change\n";
+      print "...updating $DIR/$FILE\n";
+      `cp $CACHE_DIR/$FILE $DIR/$FILE`;
+
+      if ($PERMS){
+         print "...changing permissions to: $PERMS\n";
+         `chmod $PERMS $DIR/$FILE`;
+      }
+
+      if ($OWNER){
+         print "...changing owner to: $OWNER\n";
+         `chown $OWNER $DIR/$FILE`;
+      }
+
+      if ($RESTART_CMD){
+         print "...restarting with: $RESTART_CMD\n";
+         `$RESTART_CMD`;
+      }
+   }else{
+      print "...no change found\n";
+   }
+}
+
+print "################################\n";
+
+exit 0;
+
+#######################################################
+# Subs
+#######################################################
+######################
+# Print usage message
+######################
+sub printUsage{
+   print "\nUsage: configsync [--usage|--help] [-u|--user REMOTE_USER] [-d|--remotedir REMOTE_DIR] [-h|--host REMOTE_HOST] [-s|--skipdl]\n\n";
+
+   print "--usage|--help      Print this message.\n\n";
+   print "-u|--user           Specify the user account to scp the updates as.\n\n";
+   print "-d|--remotedir      Specify the remote directory where the configs are located.\n\n";
+   print "-h|--host           Specify the remote host where the configs are located.\n\n";
+   print "-s|--skipdl         Skip the download and use what is in cache. This is useful if\n";
+   print "                    the config files are being pushed vs pulled.\n\n";
+}
+
+######################
+# Retrieve the lastest
+# configs from the server
+######################
+sub retrieveLatestConfigs{
+   `scp -o BatchMode=yes -r $REMOTE_USER\@$REMOTE_HOST:$REMOTE_DIR/* $CACHE_DIR`;
+}
+
+######################
+# Read the config file
+# and load up the %UDCFG
+# array of hashes
+######################
+sub loadCFGFile{
+   if (! -f $UDCFG_FILE){
+      print "ERROR: No Config File Found!\n";
+      exit 3;
+   }
+
+   my $ARRAY_ELEMENT = undef;
+
+   open(CFGH, "$UDCFG_FILE") or die("Can't open: $UDCFG_FILE\n");
+
+   while(<CFGH>){
+      # Remove leading and trailing spaces
+      $_ =~ s/^\s+//;
+      $_ =~ s/\s+$//;
+      $_ =~ s/\s+=\s+/=/;
+
+      # Skip blank and commented lines
+      if (($_ =~ /^$/) || ($_ =~ /^\s+#/)){next;}
+
+      # Look for opening stanza
+      if ($_ =~ /^\[(.*)\]/){
+         if (! defined($ARRAY_ELEMENT)){
+            $ARRAY_ELEMENT = "0";
+         }else{
+            $ARRAY_ELEMENT++;
+         }
+
+         $UDCFG[$ARRAY_ELEMENT]{'NAME'} = $1;
+      # Set parms for current stanza
+      }else{
+         $_ =~ /^(.*)=(.*)$/;
+
+         my $PARM = uc($1);
+
+         $UDCFG[$ARRAY_ELEMENT]{"$PARM"} = "$2";
+      }
+   }
+
+   close(CFGH);
+}
+
+######################
+# Compare files for changes
+######################
+sub diffFile{
+   my $FILE = $_[0];
+   my $DIR  = $_[1];
+
+   my @OUTPUT = `diff $CACHE_DIR/$FILE $DIR/$FILE`;
+
+   if (@OUTPUT){
+      return('1');
+   }else{
+      return('0');
+   }
+}
