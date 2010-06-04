@@ -11,7 +11,7 @@ then
    mkdir -p /etc/configsync/updates
 fi
 
-echo "Installing apsh, apscp and acoll..."
+echo "Installing configsync..."
 cp configsync /usr/local/bin/.
 
 chmod +x /usr/local/bin/configsync
