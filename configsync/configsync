@@ -90,6 +90,7 @@ foreach my $i (0 .. $#UDCFG){
 
    if (! -f "$CACHE_DIR/$FILE"){
       print "Could not find file: $CACHE_DIR/$FILE\n";
+      exit 4;
    }
 
    if (diffFile("$FILE", "$DIR")){
