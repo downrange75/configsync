@@ -1,0 +1,24 @@
+# configsync.cfg.example
+# 
+# Minimal Options
+#---------------------
+# Config Header
+#  [NAME OF HEADER]
+# File Name
+#  FILE = somefile
+# Directory
+#  DIR  = somedir
+
+#[SSHD Config]
+#FILE        = sshd_config
+#DIR         = /etc/ssh
+#OWNER       = root.root
+#PERMS       = 644
+#RESTART_CMD = /etc/init.d/sshd restart
+
+#[NTPD Config]
+#FILE        = ntp.conf
+#DIR         = /etc
+#OWNER       = root.root
+#PERMS       = 644
+#RESTART_CMD = /etc/init.d/ntpd restart
